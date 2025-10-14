@@ -10,7 +10,23 @@ import { createClient } from "@supabase/supabase-js";
 dotenv.config();
 
 const app = express();
-app.use(cors());
+// --- CORS setup ---
+const allowedOrigins = [
+  "http://localhost:5173",            // for local dev (Vite)
+  "https://voice2text-app.netlify.app/"    // your Netlify frontend URL
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: ["GET", "POST"],
+  credentials: true,
+}));
 app.use(express.json());
 
 // --- Initialize Deepgram client ---
@@ -24,7 +40,8 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = "uploads/";
     if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath);
+  fs.mkdirSync(uploadPath, { recursive: true });
+}
     }
     cb(null, uploadPath);
   },
