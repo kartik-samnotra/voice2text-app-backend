@@ -13,7 +13,7 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://your-netlify-app.netlify.app" // Replace with your actual Netlify URL
+    "https://voice2text-frontend.netlify.app/" // Replace with your actual Netlify URL
   ],
   credentials: true
 }));
