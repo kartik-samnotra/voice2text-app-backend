@@ -1,5 +1,4 @@
 import express from "express";
-import cors from "cors";
 import multer from "multer";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -12,42 +11,46 @@ dotenv.config();
 const app = express();
 
 // ✅ FIXED CORS CONFIGURATION
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://voice2text-frontend.netlify.app",
-    "https://voice2text-frontend.netlify.app/",
-    "https://*.netlify.app"
-  ],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
-}));
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://voice2text-frontend.netlify.app"
+];
 
-// Handle preflight requests
-app.options("*", cors());
-
-app.use(express.json());
-
-// Add request logging middleware
+// CORS middleware
 app.use((req, res, next) => {
-  console.log(`📨 ${new Date().toISOString()} ${req.method} ${req.url}`);
-  console.log(`   Origin: ${req.headers.origin}`);
-  console.log(`   User-Agent: ${req.headers['user-agent']}`);
+  const origin = req.headers.origin;
+  
+  // Check if the request origin is in the allowed list
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Origin, X-Requested-With");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  
+  // Handle preflight requests
+  if (req.method === "OPTIONS") {
+    console.log("✅ Handling preflight request for:", origin);
+    return res.status(200).end();
+  }
+  
+  console.log(`📨 ${new Date().toISOString()} ${req.method} ${req.url} from ${origin}`);
   next();
 });
 
-// ... rest of your server.js code remains the same
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // --- Validate keys early ---
 if (!process.env.DEEPGRAM_API_KEY) {
-  console.error("❌ Missing DEEPGRAM_API_KEY in environment. Set process.env.DEEPGRAM_API_KEY");
+  console.error("❌ Missing DEEPGRAM_API_KEY in environment.");
 }
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.error("❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment. Set them in .env");
+  console.error("❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment.");
 }
 
-// ✅ Use the SERVICE ROLE KEY (not the anon key!)
+// ✅ Supabase setup
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -56,7 +59,7 @@ const supabase = createClient(
 // Deepgram setup
 const deepgram = Deepgram.createClient(process.env.DEEPGRAM_API_KEY);
 
-// --- Multer disk storage (for uploaded audio files) ---
+// --- Multer disk storage ---
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = "uploads/";
@@ -69,7 +72,13 @@ const storage = multer.diskStorage({
     cb(null, `${Date.now()}-${file.originalname}`);
   },
 });
-const upload = multer({ storage });
+
+const upload = multer({ 
+  storage,
+  limits: {
+    fileSize: 25 * 1024 * 1024 // 25MB limit
+  }
+});
 
 // --- Helper to safely delete a file ---
 const safeUnlink = (filePath) => {
@@ -80,44 +89,57 @@ const safeUnlink = (filePath) => {
   }
 };
 
+// Test endpoint
+app.get("/api/test", (req, res) => {
+  console.log("✅ Test endpoint hit from:", req.headers.origin);
+  res.json({ 
+    message: "Backend is working with CORS!",
+    timestamp: new Date().toISOString(),
+    origin: req.headers.origin
+  });
+});
+
 // --- POST /api/transcribe ---
 app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
+  console.log("🎯 POST /api/transcribe hit from:", req.headers.origin);
   const file = req.file;
+  
   if (!file) {
-    return res
-      .status(400)
-      .json({ message: "No audio file in request (field name must be 'audio')." });
+    console.log("❌ No file in request");
+    return res.status(400).json({ message: "No audio file in request." });
   }
 
   try {
     // --- Step 1: Validate Supabase JWT ---
     const authHeader = req.headers.authorization;
+    console.log(`🔐 Auth header present: ${!!authHeader}`);
+    
     if (!authHeader) {
       safeUnlink(file.path);
-      return res
-        .status(401)
-        .json({ message: "Missing Authorization header (Bearer <token> required)." });
+      return res.status(401).json({ message: "Missing Authorization header." });
     }
+    
     const token = authHeader.split(" ")[1];
     if (!token) {
       safeUnlink(file.path);
       return res.status(401).json({ message: "Malformed Authorization header." });
     }
 
+    console.log("🔍 Validating Supabase token...");
     const { data: userData, error: userErr } = await supabase.auth.getUser(token);
+    
     if (userErr || !userData?.user) {
+      console.log("❌ Token validation failed:", userErr?.message);
       safeUnlink(file.path);
-      console.error("Supabase token error:", userErr?.message || "no user returned");
       return res.status(401).json({ message: "Invalid or expired auth token." });
     }
-    const user = userData.user;
-
+    
+    console.log("✅ User authenticated:", userData.user.id);
+    
     // --- Step 2: Prepare audio file ---
     const audioPath = path.resolve(file.path);
     const stat = fs.statSync(audioPath);
-    console.log(
-      `Received file: ${audioPath} (${stat.size} bytes), mimetype: ${file.mimetype}`
-    );
+    console.log(`Received file: ${audioPath} (${stat.size} bytes), mimetype: ${file.mimetype}`);
 
     const fileStream = fs.createReadStream(audioPath);
     const dgOptions = {
@@ -161,10 +183,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
       console.warn("Could not parse Deepgram response properly.");
     }
 
-    console.log(
-      "Deepgram transcription result (truncated):",
-      transcript ? transcript.slice(0, 200) : "<empty>"
-    );
+    console.log("Deepgram transcription result (truncated):", transcript ? transcript.slice(0, 200) : "<empty>");
 
     // --- Step 5: Save transcription to Supabase ---
     const { data: dbData, error: dbError } = await supabase
@@ -173,7 +192,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
         {
           filename: file.filename,
           transcription: transcript,
-          user_id: user.id, // ✅ crucial for RLS
+          user_id: userData.user.id,
         },
       ])
       .select();
@@ -186,20 +205,14 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
         .json({ message: "Failed to save transcription to DB.", error: dbError.message });
     }
 
-    console.log(
-      "✅ Saved transcription to Supabase for user:",
-      user.id,
-      "record:",
-      dbData?.[0]?.id
-    );
-
+    console.log("✅ Saved transcription to Supabase for user:", userData.user.id, "record:", dbData?.[0]?.id);
     safeUnlink(audioPath);
 
     return res.json({
       message: "Transcription successful",
       transcript,
       filename: file.filename,
-      user_id: user.id,
+      user_id: userData.user.id,
     });
   } catch (err) {
     console.error("Unexpected server error in /api/transcribe:", err?.message || err);
@@ -212,6 +225,8 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 
 // --- GET /api/transcriptions ---
 app.get("/api/transcriptions", async (req, res) => {
+  console.log("📋 GET /api/transcriptions from:", req.headers.origin);
+  
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader)
@@ -247,6 +262,14 @@ app.get("/api/transcriptions", async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get("/", (req, res) => {
+  res.json({ 
+    message: "Voice2Text Backend API is running!",
+    timestamp: new Date().toISOString()
+  });
+});
+
 // --- Start Server ---
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} with CORS enabled`));
