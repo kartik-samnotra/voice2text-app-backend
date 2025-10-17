@@ -10,7 +10,13 @@ import { createClient } from "@supabase/supabase-js";
 dotenv.config();
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: [
+    "http://localhost:5173",
+    "https://your-netlify-app.netlify.app" // Replace with your actual Netlify URL
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // --- Validate keys early ---
