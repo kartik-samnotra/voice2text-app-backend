@@ -10,13 +10,13 @@ dotenv.config();
 
 const app = express();
 
-// ✅ FIXED CORS CONFIGURATION
+// ✅ COMPREHENSIVE CORS CONFIGURATION
 const allowedOrigins = [
   "http://localhost:5173",
   "https://voice2text-frontend.netlify.app"
 ];
 
-// CORS middleware
+// Global CORS middleware - handles ALL requests including OPTIONS
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
@@ -25,13 +25,14 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
   
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Origin, X-Requested-With");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Origin, X-Requested-With, X-CSRF-Token");
   res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
   
-  // Handle preflight requests
+  // Handle ALL OPTIONS requests (preflight) immediately
   if (req.method === "OPTIONS") {
-    console.log("✅ Handling preflight request for:", origin);
+    console.log("✅ Handling OPTIONS preflight request for:", origin, req.url);
     return res.status(200).end();
   }
   
@@ -96,6 +97,19 @@ app.get("/api/test", (req, res) => {
     message: "Backend is working with CORS!",
     timestamp: new Date().toISOString(),
     origin: req.headers.origin
+  });
+});
+
+// Health check endpoint
+app.get("/", (req, res) => {
+  res.json({ 
+    message: "Voice2Text Backend API is running!",
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      "GET /api/test",
+      "GET /api/transcriptions",
+      "POST /api/transcribe"
+    ]
   });
 });
 
@@ -262,14 +276,20 @@ app.get("/api/transcriptions", async (req, res) => {
   }
 });
 
-// Health check endpoint
-app.get("/", (req, res) => {
-  res.json({ 
-    message: "Voice2Text Backend API is running!",
-    timestamp: new Date().toISOString()
+// Catch-all handler for undefined routes
+app.use((req, res) => {
+  console.log("❌ Route not found:", req.method, req.url);
+  res.status(404).json({ 
+    message: "Route not found",
+    path: req.url,
+    method: req.method
   });
 });
 
 // --- Start Server ---
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} with CORS enabled`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌐 CORS enabled for: ${allowedOrigins.join(', ')}`);
+  console.log(`✅ Test endpoint: http://localhost:${PORT}/api/test`);
+});
