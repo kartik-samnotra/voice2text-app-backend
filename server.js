@@ -10,14 +10,34 @@ import { createClient } from "@supabase/supabase-js";
 dotenv.config();
 
 const app = express();
+
+// ✅ FIXED CORS CONFIGURATION
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://voice2text-frontend.netlify.app/" // Replace with your actual Netlify URL
+    "https://voice2text-frontend.netlify.app",
+    "https://voice2text-frontend.netlify.app/",
+    "https://*.netlify.app"
   ],
-  credentials: true
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
 }));
+
+// Handle preflight requests
+app.options("*", cors());
+
 app.use(express.json());
+
+// Add request logging middleware
+app.use((req, res, next) => {
+  console.log(`📨 ${new Date().toISOString()} ${req.method} ${req.url}`);
+  console.log(`   Origin: ${req.headers.origin}`);
+  console.log(`   User-Agent: ${req.headers['user-agent']}`);
+  next();
+});
+
+// ... rest of your server.js code remains the same
 
 // --- Validate keys early ---
 if (!process.env.DEEPGRAM_API_KEY) {
